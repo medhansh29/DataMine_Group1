@@ -1,0 +1,8 @@
+python-dotenv
+alerce
+pandas
+matplotlib
+seaborn
+joblib
+scikit-learn
+scipy
