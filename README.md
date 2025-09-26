@@ -28,7 +28,7 @@ Once you have set up an IDE on your local computer, run the following steps in y
 
 Note: Make sure you are in the correct directory you want to be in. You can check that by looking at the text showing up on an empty terminal. Something like this: PS C:\Users\medha\OneDrive - purdue.edu\Desktop\DataMinePhysics>
 
-1. `git clone https://github.com/medhansh29/DataMine_Group1.git`
+1. `git clone https://github.com/{your_github_username}/DataMine_Group1.git`
 
 ### Running the project
 Once you have cloned the repository into your local IDE we can now run our files.
