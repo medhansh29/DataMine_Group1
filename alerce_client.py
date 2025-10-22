@@ -1,5 +1,6 @@
 import pandas as pd
 from alerce.core import Alerce
+from datapoint_filter import *
 import os
 import time
 
@@ -27,14 +28,11 @@ beginning_datapoint: int, ending_datapoint: int) -> pd.DataFrame | None:
             datapoint_count = len(light_curve_df)
             print(f"--> Found {datapoint_count} datapoints for {ztf_object_id}")
             
-            # Check if this object has the right number of datapoints
-            if datapoint_count >= beginning_datapoint and datapoint_count <= ending_datapoint:
-                print(f"{ztf_object_id} has {datapoint_count} datapoints (within range {beginning_datapoint}-{ending_datapoint})")
-                light_curve_df['oid'] = ztf_object_id
-                return light_curve_df
-            else:
-                print(f"{ztf_object_id} has {datapoint_count} datapoints (outside range {beginning_datapoint}-{ending_datapoint})")
-                return None
+            # Filter the light curve dataframe based on the datapoint range
+            light_curve_df = datapoint_filter(ztf_object_id, datapoint_count, beginning_datapoint, ending_datapoint, light_curve_df)
+            # Return the filtered dataframe (or None) to the caller
+            return light_curve_df
+            
         else:
             print(f"--> No data found for {ztf_object_id} in ALeRCE.")
             return None
