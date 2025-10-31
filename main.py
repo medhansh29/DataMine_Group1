@@ -1,5 +1,6 @@
 from datapoint_filter import fetch_and_save_ztf_data
 from redshifts import fetch_redshifts_from_csv
+from date_filter import fetch_detection_dates_menu_option
 import os
 
 def show_menu():
@@ -10,7 +11,8 @@ def show_menu():
     print("Choose an option:")
     print("1. Fetch new ZTF objects")
     print("2. Fetch redshift data for existing objects in CSV")
-    print("3. Exit")
+    print("3. Fetch first/last detection dates for objects in CSV")
+    print("4. Exit")
     print("="*50)
 
 if __name__ == '__main__':
@@ -50,6 +52,10 @@ if __name__ == '__main__':
                 print("Redshift data fetch completed!")
                 
             elif choice == '3':
+                # Fetch first/last detection dates
+                fetch_detection_dates_menu_option("ztf_objects_summary.csv")
+
+            elif choice == '4':
                 print("Exiting...")
                 break
                 
