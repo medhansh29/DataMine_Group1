@@ -1,3 +1,4 @@
+from curve_filter import filter_curve
 from datapoint_filter import fetch_and_save_ztf_data
 from redshifts import fetch_redshifts_from_csv
 from date_filter import fetch_detection_dates_menu_option
@@ -12,7 +13,8 @@ def show_menu():
     print("1. Fetch new ZTF objects")
     print("2. Fetch redshift data for existing objects in CSV")
     print("3. Fetch first/last detection dates for objects in CSV")
-    print("4. Exit")
+    print("4. Filter curve data for objects in CSV")
+    print("5. Exit")
     print("="*50)
 
 if __name__ == '__main__':
@@ -56,6 +58,10 @@ if __name__ == '__main__':
                 fetch_detection_dates_menu_option("ztf_objects_summary.csv")
 
             elif choice == '4':
+                # Filter curve data for objects in CSV
+                filter_curve("test.csv")
+
+            elif choice == '5':
                 print("Exiting...")
                 break
                 
