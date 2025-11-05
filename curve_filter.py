@@ -2,150 +2,147 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
 from scipy import stats
+from alerce.core import Alerce
 
-def filter_curve(data, object_id=None):
+def filter_curve(csv_file):
     """
-    Check if the light curve follows a t^(-5/3) decay law after peak luminosity.
+    Process a CSV file with object IDs, fetch light curve data from Alerce,
+    calculate peak luminosity from flux and distance, and calculate r^2 for t^(-5/3) decay fit.
     
     Parameters:
-    data: DataFrame with columns ['mjd', 'magpsf', 'oid'] or similar
-    object_id: Optional object identifier for logging
+    csv_file: Path to CSV file with 'oid' and 'distance' columns
     
     Returns:
-    dict: Results including peak info, decay slope, and whether it matches t^(-5/3)
-    """
-    
-    # Sort data by time
-    data_sorted = data.sort_values('mjd').reset_index(drop=True)
-    
-    # Find peak luminosity (brightest magnitude = minimum magnitude value)
-    peak_idx = data_sorted['magpsf'].idxmin()
-    peak_time = data_sorted.loc[peak_idx, 'mjd']
-    peak_mag = data_sorted.loc[peak_idx, 'magpsf']
-    
-    # Get data after the peak
-    decay_data = data_sorted.iloc[peak_idx+1:].copy()
-    
-    if len(decay_data) < 10:
-        return {
-            'object_id': object_id,
-            'peak_time': peak_time,
-            'peak_mag': peak_mag,
-            'decay_points': len(decay_data),
-            'slope': None,
-            'expected_slope': -5/3,
-            'matches_t53': False,
-            'error': 'Insufficient decay data'
-        }
-    
-    # Convert time to days since peak
-    decay_data['days_since_peak'] = decay_data['mjd'] - peak_time
-    
-    # Remove any data points with days_since_peak <= 0 (shouldn't happen but safety check)
-    decay_data = decay_data[decay_data['days_since_peak'] > 0]
-    
-    if len(decay_data) < 3:
-        return {
-            'object_id': object_id,
-            'peak_time': peak_time,
-            'peak_mag': peak_mag,
-            'decay_points': len(decay_data),
-            'slope': None,
-            'expected_slope': -5/3,
-            'matches_t53': False,
-            'error': 'No valid decay data after peak'
-        }
-    
-    # Define the t^(-5/3) power law function
-    def power_law(t, A, t0):
-        """A * (t + t0)^(-5/3)"""
-        return A * (t + t0)**(-5/3)
-    
-    # Define a linear decay function for comparison
-    def linear_decay(t, m, b):
-        """m * t + b"""
-        return m * t + b
-    
-    try:
-        # Fit t^(-5/3) power law
-        # Initial guess: A = peak_mag, t0 = 1 day
-        popt_power, _ = curve_fit(power_law, decay_data['days_since_peak'], 
-                                 decay_data['magpsf'], 
-                                 p0=[peak_mag, 1.0],
-                                 maxfev=2000)
-        
-        # Calculate R² for power law fit
-        y_pred_power = power_law(decay_data['days_since_peak'], *popt_power)
-        ss_res_power = np.sum((decay_data['magpsf'] - y_pred_power) ** 2)
-        ss_tot_power = np.sum((decay_data['magpsf'] - np.mean(decay_data['magpsf'])) ** 2)
-        r2_power = 1 - (ss_res_power / ss_tot_power)
-        
-        # Fit linear decay for comparison
-        popt_linear, _ = curve_fit(linear_decay, decay_data['days_since_peak'], 
-                                  decay_data['magpsf'])
-        
-        # Calculate R² for linear fit
-        y_pred_linear = linear_decay(decay_data['days_since_peak'], *popt_linear)
-        ss_res_linear = np.sum((decay_data['magpsf'] - y_pred_linear) ** 2)
-        ss_tot_linear = np.sum((decay_data['magpsf'] - np.mean(decay_data['magpsf'])) ** 2)
-        r2_linear = 1 - (ss_res_linear / ss_tot_linear)
-        
-        # Determine if t^(-5/3) is a good fit
-        # Consider it a match if R² > 0.7 and power law fits better than linear
-        matches_t53 = (r2_power > 0.7) and (r2_power > r2_linear)
-        
-        return {
-            'object_id': object_id,
-            'peak_time': peak_time,
-            'peak_mag': peak_mag,
-            'decay_points': len(decay_data),
-            'power_law_params': popt_power,
-            'power_law_r2': r2_power,
-            'linear_slope': popt_linear[0],
-            'linear_r2': r2_linear,
-            'expected_slope': -5/3,
-            'matches_t53': matches_t53,
-            'decay_data': decay_data
-        }
-        
-    except Exception as e:
-        return {
-            'object_id': object_id,
-            'peak_time': peak_time,
-            'peak_mag': peak_mag,
-            'decay_points': len(decay_data),
-            'slope': None,
-            'expected_slope': -5/3,
-            'matches_t53': False,
-            'error': f'Fitting failed: {str(e)}'
-        }
-
-def analyze_light_curves_from_csv(csv_file):
-    """
-    Analyze all light curves in a CSV file for t^(-5/3) decay.
-    
-    Parameters:
-    csv_file: Path to CSV file with light curve data
-    
-    Returns:
-    DataFrame: Results for each object
+    DataFrame: Original CSV with added 'peak_luminosity' and 'r_squared' columns
     """
     
     # Read the CSV file
     df = pd.read_csv(csv_file)
     
-    # Group by object ID and analyze each
-    results = []
+    # Initialize Alerce client
+    alerce_client = Alerce()
     
-    for oid in df['oid'].unique():
-        if pd.isna(oid) or oid == '':
-            continue
-            
-        object_data = df[df['oid'] == oid].copy()
+    # Lists to store results
+    peak_luminosities = []
+    r_squared_values = []
+    
+    # Get unique object IDs and their distances
+    # Create a mapping from oid to distance (assuming same distance for all rows with same oid)
+    distance_dict = df.groupby('oid')['distance'].first().to_dict()
+    
+    unique_object_ids = df['oid'].unique()
+    
+    print(f"Processing {len(unique_object_ids)} unique objects...")
+    
+    # Process each unique object
+    for idx, object_id in enumerate(unique_object_ids):
+        print(f"\n[{idx+1}/{len(unique_object_ids)}] Processing {object_id}...")
         
-        # Convert magnitude to flux-like quantity for analysis
-        # Brighter objects have lower magnitudes, so we'll work with magnitude directly
-        result = filter_curve(object_data, oid)
-        results.append(result)
+        try:
+            # Get distance for this object
+            distance = distance_dict.get(object_id)
+            has_distance = distance is not None and not np.isnan(distance)
+            
+            if not has_distance:
+                print(f"  No valid distance found for {object_id}, will use 'N/A' for peak luminosity")
+            
+            # Fetch light curve data from Alerce
+            light_curve_df = alerce_client.query_detections(object_id, format="pandas")
+            
+            if light_curve_df is None or light_curve_df.empty:
+                print(f"  No data found for {object_id}")
+                peak_luminosities.append("N/A" if not has_distance else None)
+                r_squared_values.append(None)
+                continue
+            
+            # Convert magnitude to flux: flux = 10^(-0.4 * mag)
+            light_curve_df['flux'] = 10**(-0.4 * light_curve_df['magpsf'])
+            
+            # Sort data by time
+            data_sorted = light_curve_df.sort_values('mjd').reset_index(drop=True)
+            
+            # Find peak luminosity (maximum flux)
+            peak_idx = data_sorted['flux'].idxmax()
+            max_flux = data_sorted.loc[peak_idx, 'flux']
+            peak_time = data_sorted.loc[peak_idx, 'mjd']
+            
+            # Calculate peak luminosity: L = 4π * d² * F
+            # where L is luminosity, d is distance, F is flux
+            if has_distance:
+                peak_luminosity = 4 * np.pi * (distance ** 2) * max_flux
+                print(f"  Maximum flux: {max_flux:.6e} at MJD {peak_time:.2f}")
+                print(f"  Peak luminosity: {peak_luminosity:.6e} (distance: {distance:.2e})")
+            else:
+                peak_luminosity = "N/A"
+                print(f"  Maximum flux: {max_flux:.6e} at MJD {peak_time:.2f}")
+                print(f"  Peak luminosity: N/A (no distance available)")
+            
+            # Get data after the peak
+            decay_data = data_sorted.iloc[peak_idx+1:].copy()
+            
+            if len(decay_data) < 3:
+                print(f"  Insufficient decay data ({len(decay_data)} points)")
+                peak_luminosities.append(peak_luminosity)
+                r_squared_values.append(None)
+                continue
+            
+            # Convert time to days since peak
+            decay_data['days_since_peak'] = decay_data['mjd'] - peak_time
+            
+            # Remove any data points with days_since_peak <= 0
+            decay_data = decay_data[decay_data['days_since_peak'] > 0]
+            
+            if len(decay_data) < 3:
+                print(f"  No valid decay data after peak")
+                peak_luminosities.append(peak_luminosity)
+                r_squared_values.append(None)
+                continue
+            
+            # Define the t^(-5/3) power law function
+            def power_law(t, A, t0):
+                """A * (t + t0)^(-5/3)"""
+                return A * (t + t0)**(-5/3)
+            
+            # Fit t^(-5/3) power law using flux
+            # Initial guess: A = max_flux, t0 = 1 day
+            popt_power, _ = curve_fit(power_law, decay_data['days_since_peak'], 
+                                     decay_data['flux'], 
+                                     p0=[max_flux, 1.0],
+                                     maxfev=2000)
+            
+            # Calculate R² for power law fit
+            y_pred_power = power_law(decay_data['days_since_peak'], *popt_power)
+            ss_res_power = np.sum((decay_data['flux'] - y_pred_power) ** 2)
+            ss_tot_power = np.sum((decay_data['flux'] - np.mean(decay_data['flux'])) ** 2)
+            r2_power = 1 - (ss_res_power / ss_tot_power)
+            
+            print(f"  R² value: {r2_power:.4f}")
+            
+            peak_luminosities.append(peak_luminosity)
+            r_squared_values.append(r2_power)
+            
+        except Exception as e:
+            print(f"  Error processing {object_id}: {str(e)}")
+            # Check if distance exists for this object to determine what to append
+            distance = distance_dict.get(object_id)
+            has_distance = distance is not None and not np.isnan(distance)
+            peak_luminosities.append("N/A" if not has_distance else None)
+            r_squared_values.append(None)
     
-    return pd.DataFrame(results)
+    # Add results to dataframe based on oid
+    result_dict = {}
+    for i, object_id in enumerate(unique_object_ids):
+        result_dict[object_id] = {
+            'peak_luminosity': peak_luminosities[i],
+            'r_squared': r_squared_values[i]
+        }
+    
+    # Add columns to original dataframe
+    df['peak_luminosity'] = df['oid'].map(lambda x: result_dict.get(x, {}).get('peak_luminosity'))
+    df['r_squared'] = df['oid'].map(lambda x: result_dict.get(x, {}).get('r_squared'))
+    
+    df.to_csv(csv_file, index=False)
+    
+    return df
+
+
