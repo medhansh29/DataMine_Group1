@@ -27,20 +27,46 @@ def filter_curve(csv_file):
     r_squared_values = []
     
     # Get unique object IDs and their distances
+    # Support either 'distance' or 'distance_mpc' column
+    distance_col = 'distance' if 'distance' in df.columns else ('distance_mpc' if 'distance_mpc' in df.columns else None)
+    if distance_col is None:
+        print("  Warning: No distance column found ('distance' or 'distance_mpc'). Peak luminosity will be N/A.")
     # Create a mapping from oid to distance (assuming same distance for all rows with same oid)
-    distance_dict = df.groupby('oid')['distance'].first().to_dict()
+    distance_dict = df.groupby('oid')[distance_col].first().to_dict() if distance_col else {}
     
     unique_object_ids = df['oid'].unique()
     
-    print(f"Processing {len(unique_object_ids)} unique objects...")
+    # Initialize columns if they don't exist
+    if 'peak_luminosity' not in df.columns:
+        df['peak_luminosity'] = None
+    if 'r_squared' not in df.columns:
+        df['r_squared'] = None
+    
+    # Filter to only process objects missing data
+    # Check if ALL rows for an OID have data (not just any row)
+    objects_to_process = []
+    for oid in unique_object_ids:
+        oid_rows = df[df['oid'] == oid]
+        # Check if ALL rows for this OID have both peak_luminosity and r_squared
+        all_have_peak = oid_rows['peak_luminosity'].notna().all()
+        all_have_r2 = oid_rows['r_squared'].notna().all()
+        # Process if ANY row is missing data
+        if not (all_have_peak and all_have_r2):
+            objects_to_process.append(oid)
+    
+    if not objects_to_process:
+        print(f"All {len(unique_object_ids)} unique objects already have peak_luminosity and r_squared data in all rows. Skipping processing.")
+        return df
+    
+    print(f"Processing {len(objects_to_process)} objects (skipping {len(unique_object_ids) - len(objects_to_process)} with existing data in all rows)...")
     
     # Process each unique object
-    for idx, object_id in enumerate(unique_object_ids):
-        print(f"\n[{idx+1}/{len(unique_object_ids)}] Processing {object_id}...")
+    for idx, object_id in enumerate(objects_to_process):
+        print(f"\n[{idx+1}/{len(objects_to_process)}] Processing {object_id}...")
         
         try:
             # Get distance for this object
-            distance = distance_dict.get(object_id)
+            distance = distance_dict.get(object_id) if distance_col else None
             has_distance = distance is not None and not np.isnan(distance)
             
             if not has_distance:
@@ -66,7 +92,7 @@ def filter_curve(csv_file):
             max_flux = data_sorted.loc[peak_idx, 'flux']
             peak_time = data_sorted.loc[peak_idx, 'mjd']
             
-            # Calculate peak luminosity: L = 4π * d² * F
+            # Calculate peak luminosity: L = 4π * d² * F (units per input distance)
             # where L is luminosity, d is distance, F is flux
             if has_distance:
                 peak_luminosity = 4 * np.pi * (distance ** 2) * max_flux
@@ -131,15 +157,19 @@ def filter_curve(csv_file):
     
     # Add results to dataframe based on oid
     result_dict = {}
-    for i, object_id in enumerate(unique_object_ids):
+    for i, object_id in enumerate(objects_to_process):
         result_dict[object_id] = {
             'peak_luminosity': peak_luminosities[i],
             'r_squared': r_squared_values[i]
         }
     
-    # Add columns to original dataframe
-    df['peak_luminosity'] = df['oid'].map(lambda x: result_dict.get(x, {}).get('peak_luminosity'))
-    df['r_squared'] = df['oid'].map(lambda x: result_dict.get(x, {}).get('r_squared'))
+    # Update only rows for processed objects (preserve existing data for others)
+    for oid, results in result_dict.items():
+        mask = df['oid'] == oid
+        if results['peak_luminosity'] is not None:
+            df.loc[mask, 'peak_luminosity'] = results['peak_luminosity']
+        if results['r_squared'] is not None:
+            df.loc[mask, 'r_squared'] = results['r_squared']
     
     df.to_csv(csv_file, index=False)
     

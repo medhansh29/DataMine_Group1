@@ -8,6 +8,11 @@ __pycache__/
 venv/
 env/
 ENV/
+.venv310/
+.venv/
+
+# Data directories
+delight_data/
 
 # IDE
 .vscode/

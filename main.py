@@ -2,7 +2,13 @@ from curve_filter import filter_curve
 from datapoint_filter import fetch_and_save_ztf_data
 from redshifts import fetch_redshifts_from_csv
 from date_filter import fetch_detection_dates_menu_option
+from offset import process_offsets_from_csv
+from scorer import calculate_and_save_tde_scores
 import os
+
+# Resolve CSV relative to this file regardless of CWD
+BASE_DIR = os.path.dirname(__file__)
+CSV_PATH = os.path.join(BASE_DIR, "ztf_objects_summary.csv")
 
 def show_menu():
     """Display the main menu options"""
@@ -14,7 +20,9 @@ def show_menu():
     print("2. Fetch redshift data for existing objects in CSV")
     print("3. Fetch first/last detection dates for objects in CSV")
     print("4. Filter curve data for objects in CSV")
-    print("5. Exit")
+    print("5. Compute angular offsets and normalized offsets for objects in CSV")
+    print("6. Calculate TDE scores and rank candidates")
+    print("7. Exit")
     print("="*50)
 
 if __name__ == '__main__':
@@ -22,7 +30,7 @@ if __name__ == '__main__':
         show_menu()
         
         try:
-            choice = input("Enter your choice (1-3): ").strip()
+            choice = input("Enter your choice (1-7): ").strip()
             
             if choice == '1':
                 # Fetch new ZTF objects
@@ -44,7 +52,7 @@ if __name__ == '__main__':
                 print("\n--- Fetching Redshift Data ---")
                 
                 # Check if CSV file exists
-                if not os.path.exists("ztf_objects_summary.csv"):
+                if not os.path.exists(CSV_PATH):
                     print("Error: ztf_objects_summary.csv file not found!")
                     print("Please fetch some ZTF objects first (option 1).")
                     continue
@@ -55,18 +63,46 @@ if __name__ == '__main__':
                 
             elif choice == '3':
                 # Fetch first/last detection dates
-                fetch_detection_dates_menu_option("ztf_objects_summary.csv")
+                fetch_detection_dates_menu_option(CSV_PATH)
 
             elif choice == '4':
                 # Filter curve data for objects in CSV
-                filter_curve("test.csv")
+                if not os.path.exists(CSV_PATH):
+                    print(f"Error: {os.path.basename(CSV_PATH)} file not found!")
+                else:
+                    print("\n--- Filtering light curves and computing metrics ---")
+                    updated = filter_curve(CSV_PATH)
+                    print("Light curve filtering completed and CSV updated.")
 
             elif choice == '5':
+                # Compute angular offsets and normalized offsets
+                if not os.path.exists(CSV_PATH):
+                    print(f"Error: {os.path.basename(CSV_PATH)} file not found!")
+                    print("Please fetch some ZTF objects first (option 1).")
+                else:
+                    print("\n--- Computing Angular Offsets and Normalized Offsets ---")
+                    print("Note: This uses DELIGHT and may take some time...")
+                    updated = process_offsets_from_csv(CSV_PATH)
+                    if not updated.empty:
+                        print("Offset computation completed and CSV updated.")
+
+            elif choice == '6':
+                # Calculate TDE scores and rank candidates
+                if not os.path.exists(CSV_PATH):
+                    print(f"Error: {os.path.basename(CSV_PATH)} file not found!")
+                    print("Please fetch some ZTF objects first (option 1).")
+                else:
+                    print("\n--- Calculating TDE Scores and Ranking Candidates ---")
+                    result = calculate_and_save_tde_scores(CSV_PATH)
+                    if result is not None:
+                        print("TDE scoring completed and CSV updated.")
+
+            elif choice == '7':
                 print("Exiting...")
                 break
                 
             else:
-                print("Invalid choice. Please enter 1, 2, or 3.")
+                print("Invalid choice. Please enter 1, 2, 3, 4, 5, 6, or 7.")
                 
         except ValueError:
             print("Invalid input. Please enter valid numbers.")

@@ -136,11 +136,23 @@ def update_date_ranges_from_csv(csv_path: str = "ztf_objects_summary.csv", delay
 
     client = Alerce()
 
+    # Count objects that need processing
+    needs_processing = df[
+        df['first_mjd'].isna() | 
+        df['last_mjd'].isna() | 
+        df['first_utc'].isna() | 
+        df['last_utc'].isna()
+    ]
+    if len(needs_processing) == 0:
+        print(f"All {len(df)} objects already have detection date data. Skipping processing.")
+        return
+    
+    print(f"Processing {len(needs_processing)} objects (skipping {len(df) - len(needs_processing)} with existing data)...")
+
     for index, row in df.iterrows():
         oid = row['oid']
         # Skip if we already populated both dates
         if pd.notna(row.get('first_mjd')) and pd.notna(row.get('last_mjd')) and pd.notna(row.get('first_utc')) and pd.notna(row.get('last_utc')):
-            print(f"Skipping {oid} - date range already set.")
             continue
 
         print(f"Fetching detection dates for {oid}...")

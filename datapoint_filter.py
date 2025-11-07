@@ -60,12 +60,25 @@ beginning_datapoint: int = 10, ending_datapoint: int = 300):
         print("Please provide a positive number of objects to fetch.")
         return
 
+    # Read existing OIDs from CSV if it exists
+    existing_oids = set()
+    if os.path.exists(output_filename):
+        try:
+            existing_df = pd.read_csv(output_filename)
+            if 'oid' in existing_df.columns:
+                existing_oids = set(existing_df['oid'].values)
+                print(f"Found {len(existing_oids)} existing OIDs in CSV. Will skip duplicates.")
+        except Exception as e:
+            print(f"Warning: Could not read existing CSV file: {e}")
+            print("Proceeding without duplicate check...")
+
     alerce_client = Alerce()
     all_light_curves = []
     page_num = 1
     batch_size = 500  # Query 500 objects at a time for efficiency
+    skipped_count = 0
     
-    print(f"Starting efficient query for {n_objects} ZTF objects (querying {batch_size} at a time)...")
+    print(f"Starting efficient query for {n_objects} unique ZTF objects (querying {batch_size} at a time)...")
     
     while len(all_light_curves) < n_objects:
         try:
@@ -86,13 +99,21 @@ beginning_datapoint: int = 10, ending_datapoint: int = 300):
             for i, oid in enumerate(object_ids):
                 # Stop if we've reached our target
                 if len(all_light_curves) >= n_objects:
-                    print(f"Target reached! Found {len(all_light_curves)} objects.")
+                    print(f"Target reached! Found {len(all_light_curves)} unique objects.")
                     break
+                
+                # Skip if OID already exists in CSV
+                if oid in existing_oids:
+                    skipped_count += 1
+                    if skipped_count % 10 == 0:  # Print every 10 skipped
+                        print(f"Skipped {skipped_count} duplicate OIDs so far...")
+                    continue
                     
                 light_curve_data = fetch_light_curve(oid, alerce_client, beginning_datapoint, ending_datapoint)
                 if light_curve_data is not None:
                     all_light_curves.append(light_curve_data)
-                    print(f"Progress: {len(all_light_curves)}/{n_objects} objects found")
+                    existing_oids.add(oid)  # Add to set to avoid duplicates in same run
+                    print(f"Progress: {len(all_light_curves)}/{n_objects} unique objects found")
 
         except Exception as e:
             print(f"[ERROR] Failed to query object IDs on page {page_num}: {e}")
@@ -112,15 +133,18 @@ beginning_datapoint: int = 10, ending_datapoint: int = 300):
         # Check if file exists to determine if we should append or create new
         file_exists = os.path.exists(output_filename)
         
+        if skipped_count > 0:
+            print(f"\nSkipped {skipped_count} duplicate OID(s) during fetching.")
+        
         if file_exists:
-            # Append to existing file (without header)
+            # Append to existing file (duplicates already filtered during fetching)
             combined_df.to_csv(output_filename, mode='a', header=False, index=False)
-            print(f"\nSuccessfully fetched data for {len(all_light_curves)} objects.")
-            print(f"Data appended to '{output_filename}'. Added {len(combined_df)} new rows.")
+            print(f"\nSuccessfully added {len(combined_df)} new unique object(s) to '{output_filename}'.")
+            print(f"Added OIDs: {combined_df['oid'].tolist()}")
         else:
             # Create new file with header
             combined_df.to_csv(output_filename, index=False)
             print(f"\nSuccessfully fetched data for {len(all_light_curves)} objects.")
             print(f"New file created '{output_filename}'. Total rows: {len(combined_df)}")
     else:
-        print("No valid objects found matching the criteria.")
+        print(f"\nNo valid unique objects found matching the criteria after skipping {skipped_count} duplicates.")

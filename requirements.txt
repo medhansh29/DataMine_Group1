@@ -6,5 +6,4 @@ seaborn
 joblib
 scikit-learn
 scipy
-antares-client
 astropy
