@@ -13,8 +13,6 @@ requests>=2.28.0
 sep==1.2.1
 typing-extensions==4.5.0
 
-# macOS Apple Silicon friendly TensorFlow for Python 3.10
-tensorflow-macos==2.13.0
-tensorflow-metal==1.1.0
+# Windows-compatible TensorFlow for Python 3.10
+tensorflow==2.13.0
 keras==2.13.1
-
