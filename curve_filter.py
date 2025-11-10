@@ -4,6 +4,28 @@ from scipy.optimize import curve_fit
 from scipy import stats
 from alerce.core import Alerce
 
+def is_curve_data_missing(peak_lum_val, r_squared_val):
+    """
+    Check if curve data needs to be calculated.
+    Returns True only if r_squared is missing (NaN/None/empty).
+    Returns False if r_squared has been calculated (numeric or "N/A" string).
+    
+    "N/A" strings indicate the row was processed but failed (insufficient data).
+    We skip these to avoid wasting computation on rows that already failed.
+    Numeric values indicate successful calculation, so we skip those too.
+    """
+    # Check r_squared - this is the primary indicator
+    if r_squared_val is not None and not pd.isna(r_squared_val):
+        # If it's "N/A" string, it was processed but failed
+        if isinstance(r_squared_val, str) and str(r_squared_val).strip().upper() == 'N/A':
+            return False  # Processed but failed, skip it
+        # If it's numeric, it was successfully calculated
+        if isinstance(r_squared_val, (int, float)):
+            return False  # Already calculated successfully, skip it
+    
+    # If r_squared is NaN/None/empty, the row needs processing
+    return True
+
 def filter_curve(csv_file):
     """
     Process a CSV file with object IDs, fetch light curve data from Alerce,
@@ -42,25 +64,32 @@ def filter_curve(csv_file):
     if 'r_squared' not in df.columns:
         df['r_squared'] = None
     
-    # Filter to only process objects missing data
-    # Check if ALL rows for an OID have data (not just any row)
-    objects_to_process = []
-    for oid in unique_object_ids:
-        oid_rows = df[df['oid'] == oid]
-        # Check if ALL rows for this OID have both peak_luminosity and r_squared
-        all_have_peak = oid_rows['peak_luminosity'].notna().all()
-        all_have_r2 = oid_rows['r_squared'].notna().all()
-        # Process if ANY row is missing data
-        if not (all_have_peak and all_have_r2):
-            objects_to_process.append(oid)
+    # First, scan all rows to identify which ones need processing
+    print("Scanning CSV to identify rows that need curve data (r_squared)...")
+    print("Note: Rows with 'N/A' or numeric r_squared values will be skipped.")
+    rows_to_process = []
+    oids_to_process = set()  # Track unique OIDs that need processing
     
-    if not objects_to_process:
-        print(f"All {len(unique_object_ids)} unique objects already have peak_luminosity and r_squared data in all rows. Skipping processing.")
+    for index, row in df.iterrows():
+        peak_lum_val = row.get('peak_luminosity', None)
+        r_squared_val = row.get('r_squared', None)
+        
+        # Check if this row needs processing (r_squared is missing)
+        # Skip rows with "N/A" (processed but failed) or numeric values (processed successfully)
+        if is_curve_data_missing(peak_lum_val, r_squared_val):
+            rows_to_process.append(index)
+            oids_to_process.add(row['oid'])
+    
+    if len(rows_to_process) == 0:
+        print(f"All {len(df)} rows already have curve data. Skipping processing.")
         return df
     
-    print(f"Processing {len(objects_to_process)} objects (skipping {len(unique_object_ids) - len(objects_to_process)} with existing data in all rows)...")
+    print(f"Found {len(rows_to_process)} rows that need curve data (skipping {len(df) - len(rows_to_process)} with existing data)...")
+    print(f"Processing {len(oids_to_process)} unique objects: {list(oids_to_process)[:10]}{'...' if len(oids_to_process) > 10 else ''}")
     
-    # Process each unique object
+    # Process each unique object that needs processing
+    objects_to_process = list(oids_to_process)
+    
     for idx, object_id in enumerate(objects_to_process):
         print(f"\n[{idx+1}/{len(objects_to_process)}] Processing {object_id}...")
         
@@ -77,8 +106,8 @@ def filter_curve(csv_file):
             
             if light_curve_df is None or light_curve_df.empty:
                 print(f"  No data found for {object_id}")
-                peak_luminosities.append("N/A" if not has_distance else None)
-                r_squared_values.append(None)
+                peak_luminosities.append("N/A")
+                r_squared_values.append("N/A")
                 continue
             
             # CRITICAL: Filter to only r-band (fid=2) for consistent fitting
@@ -88,8 +117,8 @@ def filter_curve(csv_file):
             
             if r_band_df.empty:
                 print(f"  No r-band (fid=2) data found for {object_id}")
-                peak_luminosities.append("N/A" if not has_distance else None)
-                r_squared_values.append(None)
+                peak_luminosities.append("N/A")
+                r_squared_values.append("N/A")
                 continue
             
             # Robust magnitude selection (prefer corrected magnitude if available)
@@ -99,8 +128,8 @@ def filter_curve(csv_file):
                 mag_col = 'magpsf'
             else:
                 print(f"  No valid magnitude column found for {object_id}")
-                peak_luminosities.append("N/A" if not has_distance else None)
-                r_squared_values.append(None)
+                peak_luminosities.append("N/A")
+                r_squared_values.append("N/A")
                 continue
             
             # Convert magnitude to flux: flux = 10^(-0.4 * mag)
@@ -118,8 +147,14 @@ def filter_curve(csv_file):
             # where L is luminosity, d is distance, F is flux
             if has_distance:
                 peak_luminosity = 4 * np.pi * (distance ** 2) * max_flux
-                print(f"  Maximum r-band flux: {max_flux:.6e} at MJD {peak_time:.2f}")
-                print(f"  Peak luminosity: {peak_luminosity:.6e} (distance: {distance:.2e})")
+                # Convert NaN to "N/A" if calculation resulted in NaN
+                if pd.isna(peak_luminosity) or np.isnan(peak_luminosity):
+                    peak_luminosity = "N/A"
+                    print(f"  Maximum r-band flux: {max_flux:.6e} at MJD {peak_time:.2f}")
+                    print(f"  Peak luminosity: N/A (calculation resulted in NaN)")
+                else:
+                    print(f"  Maximum r-band flux: {max_flux:.6e} at MJD {peak_time:.2f}")
+                    print(f"  Peak luminosity: {peak_luminosity:.6e} (distance: {distance:.2e})")
             else:
                 peak_luminosity = "N/A"
                 print(f"  Maximum r-band flux: {max_flux:.6e} at MJD {peak_time:.2f}")
@@ -130,8 +165,12 @@ def filter_curve(csv_file):
             
             if len(decay_data) < 3:
                 print(f"  Insufficient r-band decay data ({len(decay_data)} points)")
+                # Ensure peak_luminosity is "N/A" if it's NaN
+                if peak_luminosity is not None and not isinstance(peak_luminosity, str):
+                    if pd.isna(peak_luminosity) or np.isnan(peak_luminosity):
+                        peak_luminosity = "N/A"
                 peak_luminosities.append(peak_luminosity)
-                r_squared_values.append(None)
+                r_squared_values.append("N/A")
                 continue
             
             # Convert time to days since peak
@@ -142,8 +181,12 @@ def filter_curve(csv_file):
             
             if len(decay_data) < 3:
                 print(f"  No valid r-band decay data after peak")
+                # Ensure peak_luminosity is "N/A" if it's NaN
+                if peak_luminosity is not None and not isinstance(peak_luminosity, str):
+                    if pd.isna(peak_luminosity) or np.isnan(peak_luminosity):
+                        peak_luminosity = "N/A"
                 peak_luminosities.append(peak_luminosity)
-                r_squared_values.append(None)
+                r_squared_values.append("N/A")
                 continue
             
             # Define the t^(-5/3) power law function
@@ -298,6 +341,10 @@ def filter_curve(csv_file):
                 print(f"  Error fitting power law: {e}")
                 r2_power = None
             
+            # Ensure peak_luminosity is "N/A" if it's NaN
+            if peak_luminosity is not None and not isinstance(peak_luminosity, str):
+                if pd.isna(peak_luminosity) or np.isnan(peak_luminosity):
+                    peak_luminosity = "N/A"
             peak_luminosities.append(peak_luminosity)
             r_squared_values.append(r2_power)
             
@@ -306,8 +353,8 @@ def filter_curve(csv_file):
             # Check if distance exists for this object to determine what to append
             distance = distance_dict.get(object_id)
             has_distance = distance is not None and not np.isnan(distance)
-            peak_luminosities.append("N/A" if not has_distance else None)
-            r_squared_values.append(None)
+            peak_luminosities.append("N/A")
+            r_squared_values.append("N/A")
     
     # Add results to dataframe based on oid
     result_dict = {}
@@ -317,13 +364,18 @@ def filter_curve(csv_file):
             'r_squared': r_squared_values[i]
         }
     
-    # Update only rows for processed objects (preserve existing data for others)
+    # Update only rows that were identified as needing processing
     for oid, results in result_dict.items():
-        mask = df['oid'] == oid
-        if results['peak_luminosity'] is not None:
-            df.loc[mask, 'peak_luminosity'] = results['peak_luminosity']
-        if results['r_squared'] is not None:
-            df.loc[mask, 'r_squared'] = results['r_squared']
+        # Only update rows that were in our rows_to_process list
+        mask = (df['oid'] == oid) & (df.index.isin(rows_to_process))
+        # Always update with the result (even if it's "N/A")
+        # Convert any NaN peak_luminosity values to "N/A"
+        peak_lum_val = results['peak_luminosity']
+        if peak_lum_val is not None and not isinstance(peak_lum_val, str):
+            if pd.isna(peak_lum_val) or (isinstance(peak_lum_val, (int, float)) and np.isnan(peak_lum_val)):
+                peak_lum_val = "N/A"
+        df.loc[mask, 'peak_luminosity'] = peak_lum_val
+        df.loc[mask, 'r_squared'] = results['r_squared']
     
     df.to_csv(csv_file, index=False)
     

@@ -326,7 +326,7 @@ Choose an option:
 - Queries ALeRCE API for all detections per object
 - Extracts first and last detection dates (MJD format)
 - Calculates observation duration (days)
-- Updates CSV with date columns: `first_mjd`, `last_mjd`, `first_utc`, `last_utc`, `duration_days`
+- Updates CSV with date columns: `first_mjd`, `last_mjd`, `duration_days`
 - Skips objects that already have date data
 
 #### **Option 4: Filter Curve Data**
@@ -407,8 +407,8 @@ python testing_candidate.py
 The `ztf_objects_summary.csv` file contains comprehensive data:
 
 ```csv
-oid,num_detections,redshift,distance_mpc,first_mjd,last_mjd,first_utc,last_utc,duration_days,peak_luminosity,r_squared,angular_offset_arcsec,host_size_arcsec,angular_normalized_offset,offset_score,r_squared_score,duration_score,host_size_score,Primary_Score,Bonus,Total_TDE_Score
-ZTF17aaaaaby,24,0.123456,527.45,58509.199,59815.444,2019-01-26T...,2022-08-24T...,1306.245,2.07e-06,0.845,0.454,3.404,0.133,1.0,1.0,0.5,1.0,0.875,0.1,0.975
+oid,num_detections,redshift,distance_mpc,first_mjd,last_mjd,duration_days,peak_luminosity,r_squared,angular_offset_arcsec,host_size_arcsec,angular_normalized_offset,offset_score,r_squared_score,duration_score,host_size_score,Primary_Score,Bonus,Total_TDE_Score
+ZTF17aaaaaby,24,0.123456,527.45,58509.199,59815.444,1306.245,2.07e-06,0.845,0.454,3.404,0.133,1.0,1.0,0.5,1.0,0.875,0.1,0.975
 ```
 
 **Column Descriptions:**
@@ -424,8 +424,6 @@ ZTF17aaaaaby,24,0.123456,527.45,58509.199,59815.444,2019-01-26T...,2022-08-24T..
 ### Temporal Data:
 - `first_mjd`: Modified Julian Date of first detection
 - `last_mjd`: Modified Julian Date of last detection
-- `first_utc`: UTC timestamp of first detection
-- `last_utc`: UTC timestamp of last detection
 - `duration_days`: Number of days between first and last detection
 
 ### Light Curve Metrics:
@@ -450,6 +448,79 @@ ZTF17aaaaaby,24,0.123456,527.45,58509.199,59815.444,2019-01-26T...,2022-08-24T..
   - Negative scores indicate outliers/anomalies
   - Typically ranges from -0.1 to 0.1 for TDE candidates
 
+## Recent Improvements (Post-3000 Objects Update)
+
+### Performance and Efficiency Enhancements
+
+All processing functions (options 2, 3, and 4) now use a **two-phase scanning approach** for maximum efficiency:
+
+1. **Initial Scan Phase**: Quickly scans all rows in the CSV to identify which ones need processing
+2. **Processing Phase**: Only processes the rows identified in the scan, skipping all others
+
+This approach ensures that:
+- **Option 2 (Redshift)**: Skips rows with numeric redshift values or "N/A (No catsHTM match)" strings
+- **Option 3 (Detection Dates)**: Skips rows that already have `first_mjd` and `last_mjd` values
+- **Option 4 (Curve Filter)**: Skips rows with numeric `r_squared` values or "N/A" strings
+
+### "N/A" Value Management System
+
+Implemented a consistent "N/A" value system across all processing functions (similar to redshift handling):
+
+- **Empty/NaN values**: Indicate rows that have never been processed
+- **"N/A" strings**: Indicate rows that were processed but failed (insufficient data, no match, etc.)
+- **Numeric values**: Indicate successful processing
+
+This system:
+- Prevents unnecessary reprocessing of failed attempts
+- Makes it clear which rows were attempted vs. never processed
+- Allows the scanning logic to efficiently skip already-processed rows
+
+### Code Improvements
+
+#### `redshifts.py`
+- **Added**: Initial scan phase to identify rows needing processing
+- **Added**: `is_redshift_missing()` function to check for missing data
+- **Updated**: Skips rows with "N/A (No catsHTM match)" strings (already processed)
+- **Updated**: Only processes rows with truly empty/NaN redshift values
+
+#### `date_filter.py`
+- **Removed**: UTC conversion code and UTC columns (`first_utc`, `last_utc`)
+- **Added**: Initial scan phase to identify rows needing processing
+- **Added**: `is_date_data_missing()` function to check for missing date data
+- **Updated**: Only processes rows with empty/NaN `first_mjd` or `last_mjd` values
+- **Result**: Faster processing (no UTC conversion overhead) and cleaner CSV
+
+#### `curve_filter.py`
+- **Merged**: Improved R² calculation from GitHub (r-band only, robust fitting with rebrightening detection)
+- **Added**: Initial scan phase to identify rows needing processing
+- **Added**: `is_curve_data_missing()` function to check for missing curve data
+- **Updated**: Writes "N/A" for failed calculations (instead of NaN)
+- **Updated**: Skips rows with "N/A" or numeric `r_squared` values
+- **Removed**: `curve_processed` column (using "N/A" method instead)
+- **Result**: More accurate R² values and faster processing
+
+#### `datapoint_filter.py`
+- **Added**: Automatic retry logic for 504 Gateway Timeout errors
+- **Added**: Exponential backoff (5s, 10s, 15s delays between retries)
+- **Added**: Automatic page skipping if a page fails after max retries
+- **Result**: More robust handling of temporary API server issues
+
+### CSV Cleanup
+
+- **Removed**: Malformed columns (`distance_mpcZTF17aaaaaby`, `24`)
+- **Removed**: `curve_processed` column (replaced with "N/A" method)
+- **Removed**: UTC timestamp columns (`first_utc`, `last_utc`)
+- **Result**: Cleaner, more maintainable CSV structure
+
+### Key Benefits
+
+1. **Faster Processing**: Only processes new rows, skips already-processed ones
+2. **No Wasted Computation**: Doesn't retry rows that previously failed
+3. **Better Error Handling**: Automatic retries for temporary server issues
+4. **Cleaner Data**: Removed unnecessary columns and conversion overhead
+5. **More Accurate Results**: Improved R² calculation with robust fitting
+6. **Consistent Behavior**: All options use the same scanning and "N/A" approach
+
 ## Changes to Existing Files
 
 ### `main.py`
@@ -462,21 +533,31 @@ ZTF17aaaaaby,24,0.123456,527.45,58509.199,59815.444,2019-01-26T...,2022-08-24T..
 - **Added**: Duplicate OID checking before adding to CSV
 - **Added**: Continues fetching until required number of unique objects found
 - **Added**: Debug output showing skipped duplicates
+- **Added**: Automatic retry logic for 504 Gateway Timeout errors (up to 3 retries with exponential backoff)
+- **Added**: Automatic page skipping if a page fails after max retries
 - **Changed**: Now filters out existing OIDs during fetching process
 
 ### `redshifts.py`
+- **Added**: Initial scan phase to identify rows needing processing
+- **Added**: `is_redshift_missing()` function to check for missing data
 - **Added**: Multi-catalog support (tries GAIA, SDSS, NED, SIMBAD, etc.)
 - **Added**: Direct API call fallback
 - **Added**: Extensive debug output
-- **Added**: Skips objects that already have redshift data
+- **Updated**: Skips rows with "N/A (No catsHTM match)" strings (already processed)
+- **Updated**: Only processes rows with truly empty/NaN redshift values
 - **Added**: Better error handling and traceback
 
 ### `date_filter.py`
+- **Added**: Initial scan phase to identify rows needing processing
+- **Added**: `is_date_data_missing()` function to check for missing date data
 - **Added**: Skips objects that already have date data
-- **Added**: Summary message showing how many objects are skipped
-- **Added**: UTC timestamp columns (`first_utc`, `last_utc`)
+- **Removed**: UTC conversion code and UTC columns (`first_utc`, `last_utc`) for faster processing
+- **Updated**: Only processes rows with empty/NaN `first_mjd` or `last_mjd` values
 
 ### `curve_filter.py`
+- **Merged**: Improved R² calculation from GitHub (r-band only, robust fitting)
+- **Added**: Initial scan phase to identify rows needing processing
+- **Added**: `is_curve_data_missing()` function to check for missing curve data
 - **Added**: R-band only filtering (fid=2) - cannot mix r and g band data
 - **Added**: Robust fitting mechanism:
   - Pre-filters obvious rebrightening (flux increases >5%)
@@ -485,6 +566,9 @@ ZTF17aaaaaby,24,0.123456,527.45,58509.199,59815.444,2019-01-26T...,2022-08-24T..
   - Preferentially removes points above fit (rebrightening)
   - Tracks best fit across iterations
 - **Added**: Better handling of noisy/variable light curves
+- **Updated**: Writes "N/A" for failed calculations (instead of NaN)
+- **Updated**: Skips rows with "N/A" or numeric `r_squared` values
+- **Removed**: `curve_processed` column (using "N/A" method instead)
 - **Changed**: Now uses only r-band data for consistent fitting
 - **Changed**: Improved error handling for curve fitting failures
 

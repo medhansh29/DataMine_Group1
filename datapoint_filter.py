@@ -77,50 +77,89 @@ beginning_datapoint: int = 10, ending_datapoint: int = 300):
     page_num = 1
     batch_size = 500  # Query 500 objects at a time for efficiency
     skipped_count = 0
+    max_retries = 3  # Maximum number of retries for 504/timeout errors
+    retry_delay = 5  # Initial delay in seconds
     
     print(f"Starting efficient query for {n_objects} unique ZTF objects (querying {batch_size} at a time)...")
     
     while len(all_light_curves) < n_objects:
-        try:
-            # Query for a batch of object IDs
-            print(f"Querying batch {page_num} ({batch_size} objects)...")
-            objects_df = alerce_client.query_objects(page_size=batch_size, page=page_num, format="pandas")
-            
-            # Check if the objects DataFrame is empty
-            if objects_df.empty:
-                print("No more objects found. The ALeRCE API might be temporarily unavailable or we've reached the end of available objects.")
-                break
-            
-            # Convert the object IDs to a list
-            object_ids = objects_df['oid'].tolist()
-            print(f"Retrieved {len(object_ids)} object IDs from batch {page_num}")
-
-            # Process each object in the batch
-            for i, oid in enumerate(object_ids):
-                # Stop if we've reached our target
-                if len(all_light_curves) >= n_objects:
-                    print(f"Target reached! Found {len(all_light_curves)} unique objects.")
+        retry_count = 0
+        success = False
+        
+        while retry_count < max_retries and not success:
+            try:
+                # Query for a batch of object IDs
+                if retry_count > 0:
+                    print(f"Retrying batch {page_num} (attempt {retry_count + 1}/{max_retries})...")
+                    time.sleep(retry_delay * retry_count)  # Exponential backoff
+                else:
+                    print(f"Querying batch {page_num} ({batch_size} objects)...")
+                
+                objects_df = alerce_client.query_objects(page_size=batch_size, page=page_num, format="pandas")
+                
+                # Check if the objects DataFrame is empty
+                if objects_df.empty:
+                    print("No more objects found. The ALeRCE API might be temporarily unavailable or we've reached the end of available objects.")
+                    success = True  # Not an error, just no more data
                     break
                 
-                # Skip if OID already exists in CSV
-                if oid in existing_oids:
-                    skipped_count += 1
-                    if skipped_count % 10 == 0:  # Print every 10 skipped
-                        print(f"Skipped {skipped_count} duplicate OIDs so far...")
-                    continue
-                    
-                light_curve_data = fetch_light_curve(oid, alerce_client, beginning_datapoint, ending_datapoint)
-                if light_curve_data is not None:
-                    all_light_curves.append(light_curve_data)
-                    existing_oids.add(oid)  # Add to set to avoid duplicates in same run
-                    print(f"Progress: {len(all_light_curves)}/{n_objects} unique objects found")
+                # Convert the object IDs to a list
+                object_ids = objects_df['oid'].tolist()
+                print(f"Retrieved {len(object_ids)} object IDs from batch {page_num}")
 
-        except Exception as e:
-            print(f"[ERROR] Failed to query object IDs on page {page_num}: {e}")
-            print("Please check the ALeRCE API status or try again later.")
-            break
+                # Process each object in the batch
+                for i, oid in enumerate(object_ids):
+                    # Stop if we've reached our target
+                    if len(all_light_curves) >= n_objects:
+                        print(f"Target reached! Found {len(all_light_curves)} unique objects.")
+                        break
+                    
+                    # Skip if OID already exists in CSV
+                    if oid in existing_oids:
+                        skipped_count += 1
+                        if skipped_count % 10 == 0:  # Print every 10 skipped
+                            print(f"Skipped {skipped_count} duplicate OIDs so far...")
+                        continue
+                        
+                    light_curve_data = fetch_light_curve(oid, alerce_client, beginning_datapoint, ending_datapoint)
+                    if light_curve_data is not None:
+                        all_light_curves.append(light_curve_data)
+                        existing_oids.add(oid)  # Add to set to avoid duplicates in same run
+                        print(f"Progress: {len(all_light_curves)}/{n_objects} unique objects found")
+                
+                success = True  # Successfully processed this batch
+                
+            except Exception as e:
+                error_str = str(e)
+                # Check if it's a 504 or 5xx server error (timeout/server issue)
+                is_server_error = '504' in error_str or '50' in error_str or 'timeout' in error_str.lower() or 'gateway' in error_str.lower()
+                
+                if is_server_error and retry_count < max_retries - 1:
+                    retry_count += 1
+                    print(f"[WARNING] Server error (504/timeout) on page {page_num}: {e}")
+                    print(f"Waiting {retry_delay * retry_count} seconds before retry {retry_count}/{max_retries}...")
+                    time.sleep(retry_delay * retry_count)
+                else:
+                    # Non-retryable error or max retries reached
+                    print(f"[ERROR] Failed to query object IDs on page {page_num}: {e}")
+                    if is_server_error:
+                        print(f"Max retries ({max_retries}) reached for this page.")
+                        break  # Break out of retry loop, will be handled below
+                    else:
+                        print("Please check the ALeRCE API status or try again later.")
+                        return  # Exit completely for non-server errors
         
-        page_num += 1
+        if success:
+            # Only increment page number if we successfully processed it
+            page_num += 1
+        elif retry_count >= max_retries:
+            # If we couldn't process this page after retries, move to next page
+            print(f"Skipping page {page_num} after {max_retries} failed attempts. Moving to next page...")
+            page_num += 1
+            continue
+        else:
+            # Non-retryable error, exit
+            break
 
     # Create a DataFrame with only oid and num_detections columns
     if all_light_curves:
