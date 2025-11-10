@@ -5,6 +5,7 @@ from date_filter import fetch_detection_dates_menu_option
 from offset import process_offsets_from_csv
 from scorer import calculate_and_save_tde_scores
 import os
+import time
 
 # Resolve CSV relative to this file regardless of CWD
 BASE_DIR = os.path.dirname(__file__)
@@ -43,9 +44,13 @@ if __name__ == '__main__':
                 datapoint_2_str = input("Enter the ending datapoint range: ")
                 ending_datapoint = int(datapoint_2_str)
 
+                start_time = time.time()
                 print("Fetching ZTF object data...")
                 fetch_and_save_ztf_data(num_objects, beginning_datapoint=beginning_datapoint, ending_datapoint=ending_datapoint)
                 print("ZTF object data fetch completed!")
+                end_time = time.time()
+                elapsed_time = end_time - start_time
+                print(f"Time taken: {elapsed_time:.2f} seconds")
                 
             elif choice == '2':
                 # Fetch redshift data for existing objects

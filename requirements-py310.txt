@@ -22,4 +22,3 @@ tqdm>=4.67.1
 tensorflow-macos==2.13.0
 tensorflow-metal==1.1.0
 keras==2.13.1
-
