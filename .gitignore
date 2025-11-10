@@ -14,6 +14,9 @@ ENV/
 # Data directories
 delight_data/
 
+# CSV data files (personal test data)
+ztf_objects_summary.csv
+
 # IDE
 .vscode/
 .idea/
