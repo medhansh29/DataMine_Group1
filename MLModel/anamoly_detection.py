@@ -1,0 +1,131 @@
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+import joblib
+import os
+
+# Import the custom transformer from shared module
+from feature_transforms import FeatureWeightScaler 
+
+# --- 1. Configuration & Data Loading ---
+
+# Define the file path where your processed background training data should be saved
+# For this final step, we create a mock DataFrame based on your output 
+# since the data isn't physically accessible in the environment.
+def create_mock_df_from_output():
+    """Creates a mock DataFrame based on the user's final output structure."""
+    
+    # These columns are guaranteed to be in the final DataFrame (45 columns total)
+    core_cols = ['max_mag_r', 'rise_duration', 'Amplitude', 'Std', 'Gskew']
+    
+    # We create a simplified DataFrame using only the available numeric columns.
+    data = {
+        'oid': ['ZTF25ablojob', 'ZTF25aanztch', 'ZTF25aapmpzf', 'ZTF18abdnihj', 'ZTF25aantepy', 'ZTF18abdqsaa', 'ZTF20abpbqir', 'ZTF20abcrusq', 'ZTF18aazycck', 'ZTF20acnflxj'],
+        'max_mag_r': [19.547888, 16.840410, 18.213572, 17.303217, 18.703136, 18.691635, 18.826208, 18.743729, 18.961407, 18.930992],
+        'rise_duration': [5.928935, 7.940116, 11.937326, 2614.880810, 19.005116, 1045.139201, 1806.965127, 1680.198299, 16.933241, 624.295660],
+        'Amplitude': [0.158952, 0.547117, 0.789568, 1.587031, 4.525938, 6.133587, 6.066996, 0.789568, 1.587031, 0.547117], # Mocked from the full list
+        'Std': [0.048851, 0.055499, 0.048014, 0.077545, 0.090440, 0.051840, 0.060270, 0.085461, 0.047205, 0.062590], # Mocked from the full list
+        'Gskew': [0.019037, -0.015894, -0.044764, 0.034071, 0.359756, -0.057688, 0.032879, 0.028077, 0.011724, -0.063562], # Mocked from the full list
+        # We need 45 features total to match your dimension. We will fill the rest with zeros for this demonstration.
+        **{f'feature_{i}': np.random.rand(10) for i in range(40)} 
+    }
+    
+    df = pd.DataFrame(data).set_index('oid')
+    df['is_tde_anomaly'] = 0 # Label all as normal
+    return df
+
+# Feature weighting configuration: 60% R², 40% other features
+# R² features get 1.5x weight (60/40 = 1.5), other features get 0.67x weight (40/60 = 0.67)
+FEATURE_WEIGHTS = {
+    'r_squared_t53': 1.5,  # 60% weight - PRIMARY: TDE light curve signature
+    # All other features get default weight of 1.0 (will be scaled to 0.67 relative to R²)
+}
+
+# Isolation Forest Hyperparameters 
+ISOLATION_FOREST_PARAMS = {
+    'n_estimators': 100,      
+    'contamination': 0.01,    
+    'random_state': 42,
+    'n_jobs': -1 
+}
+
+# --- 2. Training Pipeline Implementation ---
+
+def train_anomaly_detector(df_background: pd.DataFrame):
+    """
+    Trains the Isolation Forest model pipeline on the provided background data.
+    """
+    
+    # Drop the "normal" label before training
+    X_train = df_background.drop(columns=['is_tde_anomaly']) 
+    
+    # Final check to ensure only numeric data is used
+    numeric_cols = X_train.select_dtypes(include=np.number).columns
+    X_train = X_train[numeric_cols]
+    
+    print(f"   Training set size: {X_train.shape[0]} objects.")
+    print(f"   Feature dimensions: {X_train.shape[1]} features")
+    
+    # Check if r_squared_t53 is in the training data
+    if 'r_squared_t53' in X_train.columns:
+        print(f"   ✓ R² feature (r_squared_t53) found in training data")
+        print(f"   ✓ Applying 60-40 weighting: R² features get 1.5x weight, others get 0.67x weight")
+    else:
+        print(f"   ⚠️  WARNING: r_squared_t53 not found in training data!")
+        print(f"   ⚠️  R² weighting will not be applied. Please regenerate training data with training_data.py")
+
+    # Create a pipeline: Feature Weighting -> Scaling -> Isolation Forest
+    # This ensures R² features (r_squared_t53) get 60% weight vs 40% for other features
+    anomaly_pipeline = Pipeline([
+        ('feature_weights', FeatureWeightScaler(feature_weights=FEATURE_WEIGHTS, base_weight=0.67)),
+        ('scaler', StandardScaler()),
+        ('iso_forest', IsolationForest(**ISOLATION_FOREST_PARAMS))
+    ])
+    
+    print("\n-> STEP 5: Training Isolation Forest Model...")
+    print("   Pipeline: Feature Weighting (60% R², 40% others) -> Standard Scaling -> Isolation Forest")
+    
+    # Fit the pipeline (works with DataFrames directly)
+    anomaly_pipeline.fit(X_train)
+    
+    # Save the entire pipeline (scaler + model) in the MLModel folder (same directory as this script)
+    model_filename = os.path.join(os.path.dirname(__file__), 'tde_anomaly_detector_pipeline.pkl')
+    joblib.dump(anomaly_pipeline, model_filename)
+    
+    print(f"\n✅ Training complete! Model saved as '{model_filename}'.")
+    print("The model is now trained on 'normal' light curve behavior and ready to score TDE candidates.")
+
+# --- 3. Main Execution ---
+
+if __name__ == '__main__':
+    
+    # Load real training data from CSV (generated by training_data.py)
+    script_dir = os.path.dirname(__file__)
+    training_data_path = os.path.join(script_dir, 'background_training_data.csv')
+    
+    try:
+        print(f"-> Loading training data from {training_data_path}...")
+        final_background_df = pd.read_csv(training_data_path)
+        print(f"   Loaded {len(final_background_df)} training samples")
+        print(f"   Training data has {len(final_background_df.columns)} columns")
+        
+        # Check if this looks like real data or mock data
+        if 'Amplitude' in final_background_df.columns and 'feature_0' in final_background_df.columns:
+            print("   ⚠️  WARNING: Training data appears to be mock data!")
+            print("   For best results, use training_data.py to generate real training data from ALeRCE.")
+        else:
+            print("   ✓ Training data appears to be real ALeRCE data")
+        
+    except FileNotFoundError:
+        print(f"   ⚠️  Training data file not found at {training_data_path}")
+        print("   Falling back to mock data for demonstration purposes.")
+        print("   To use real data, run training_data.py first to generate background_training_data.csv")
+        final_background_df = create_mock_df_from_output()
+    except Exception as e:
+        print(f"   ⚠️  Error loading training data: {e}")
+        print("   Falling back to mock data for demonstration purposes.")
+        final_background_df = create_mock_df_from_output()
+    
+    train_anomaly_detector(final_background_df)

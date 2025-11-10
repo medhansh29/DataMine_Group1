@@ -5,9 +5,9 @@ import pandas as pd
 WEIGHTS = {
     # 5% was added from num_detections, increasing the weight of the geometric filter
     'offset_score': 0.55, # angular_normalized_offset (HIGH PRIORITY)
-    'r_squared_score': 0.30, # r_squared
+    'r_squared_score': 0.33, # r_squared
     'duration_score': 0.10, # duration_days
-    'host_size_score': 0.05, # host_size_arcsec
+    'host_size_score': 0.02, # host_size_arcsec
 }
 PEAK_LUMINOSITY_THRESHOLD = 1.0e-6 # Based on your suggestion
 BONUS_SCORE = 0.10
@@ -40,9 +40,9 @@ def score_normalized_offset(offset):
     """Scores TDE likelihood based on angular_normalized_offset (55% weight)."""
     if pd.isna(offset) or offset <= 0.0:
         return 0.0
-    elif offset <= 0.2:
+    elif offset <= 0.1:
         return 1.0 # High Score: Closest to host center
-    elif offset <= 0.5:
+    elif offset <= 0.3:
         return 0.5 # Moderate Score
     else:
         return 0.0 # Low Score: Too far from center
@@ -62,9 +62,9 @@ def score_duration(duration):
     """Scores TDE likelihood based on duration_days (10% weight)."""
     if pd.isna(duration):
         return 0.0
-    elif 200 <= duration <= 1000:
+    elif 30 <= duration <= 250:
         return 1.0 # High Score: Typical TDE timescale
-    elif 100 <= duration < 200 or 1000 < duration <= 2000:
+    elif 250 <= duration < 450:
         return 0.5 # Moderate Score: Acceptable range
     else:
         return 0.0 # Low Score: Too short (SN-like) or too long (AGN-like)
