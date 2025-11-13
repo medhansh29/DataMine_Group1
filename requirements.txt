@@ -1,9 +1,21 @@
-python-dotenv
-alerce
-pandas
-matplotlib
-seaborn
-joblib
-scikit-learn
-scipy
-astropy
+# Requirements for Render deployment
+# Render uses requirements.txt by default
+
+# FastAPI and server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.11.0
+
+# Plotting
+matplotlib>=3.8.0
+
+# API client
+alerce>=1.4.0
+
+# Other dependencies
+python-dotenv>=1.0.0
+requests>=2.28.0
