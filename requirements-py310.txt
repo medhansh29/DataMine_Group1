@@ -16,6 +16,8 @@ requests>=2.28.0
 sep==1.2.1
 typing-extensions>=4.6.0
 tqdm>=4.67.1
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
 
 # macOS Apple Silicon friendly TensorFlow for Python 3.10
 # DO NOT USE ON WINDOWS - Use requirements-py310-windows.txt instead
