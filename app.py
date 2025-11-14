@@ -231,7 +231,53 @@ def get_csv(oid: str = Query(None, description="Optional: Get a specific row by 
         print(f"[DEBUG] Returning {len(result)} records", flush=True)
         sys.stdout.flush()
         
-        return result
+        # Ensure all data is JSON serializable before returning
+        print(f"[DEBUG] Validating JSON serialization...", flush=True)
+        serialization_passed = False
+        try:
+            # Test serialization with a sample
+            import json
+            test_sample = result[:10] if len(result) > 10 else result
+            json.dumps(test_sample)
+            serialization_passed = True
+            print(f"[DEBUG] JSON serialization test passed (tested {len(test_sample)} items)", flush=True)
+        except (TypeError, ValueError) as json_error:
+            print(f"[ERROR] JSON serialization failed: {json_error}", flush=True)
+            print(f"[ERROR] Problem with data types in result", flush=True)
+            # Try to fix non-serializable values
+            for item in result:
+                for key, value in item.items():
+                    if not isinstance(value, (str, int, float, bool, type(None))):
+                        try:
+                            # Try to convert to string
+                            item[key] = str(value)
+                        except:
+                            item[key] = None
+            print(f"[DEBUG] Attempted to fix non-serializable values", flush=True)
+            # Retest after fixing
+            try:
+                import json
+                json.dumps(result[:10] if len(result) > 10 else result)
+                serialization_passed = True
+                print(f"[DEBUG] JSON serialization test passed after fixing", flush=True)
+            except:
+                print(f"[ERROR] Still failing after fix attempt", flush=True)
+        
+        # Use JSONResponse explicitly to ensure proper serialization
+        print(f"[DEBUG] Returning data via JSONResponse (serialization_passed={serialization_passed})...", flush=True)
+        sys.stdout.flush()
+        try:
+            response = JSONResponse(content=result)
+            print(f"[DEBUG] JSONResponse created successfully, returning now...", flush=True)
+            sys.stdout.flush()
+            return response
+        except Exception as return_error:
+            print(f"[ERROR] Error returning result: {return_error}", flush=True)
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error returning data: {str(return_error)}"
+            )
         
     except HTTPException:
         # Re-raise HTTP exceptions
