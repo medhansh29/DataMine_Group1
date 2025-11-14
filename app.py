@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
@@ -50,13 +50,55 @@ if 'r_squared' in df.columns:
             r_squared_map[oid] = None
 
 @app.get("/csv")
-def get_csv():
-    # Select the columns to show
-    cols_to_show = ["oid", "peak_luminosity", "r_squared", "total_tde_score"]
-    subset = df[cols_to_show]
+def get_csv(request: Request):
+    """
+    Get CSV data as JSON array with plot image URLs included.
+    Returns: List of objects with oid, peak_luminosity, r_squared, Total_TDE_Score, plot_url
+    """
+    try:
+        # Get the base URL for constructing plot URLs
+        base_url = str(request.base_url).rstrip('/')
+        
+        # Select the columns to show
+        # Note: Column names match CSV exactly (case-sensitive)
+        cols_to_show = ["oid", "peak_luminosity", "r_squared", "Total_TDE_Score"]
+        
+        # Check if all columns exist
+        missing_cols = [col for col in cols_to_show if col not in df.columns]
+        if missing_cols:
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Missing columns in CSV: {missing_cols}. Available columns: {list(df.columns)}"
+            )
+        
+        subset = df[cols_to_show]
+        
+        # Convert the subset to a dictionary and return it
+        # This returns a list of dictionaries: [{"oid": "...", "peak_luminosity": ..., ...}, ...]
+        result = subset.to_dict(orient="records")
+        
+        # Add plot_url for each OID
+        for item in result:
+            oid = item['oid']
+            # Create URL to the plot endpoint for this OID
+            item['plot_url'] = f"{base_url}/plot/{oid}"
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing CSV: {str(e)}")
 
-    # Convert the subset to a dictionary and return it
-    return subset.to_dict(orient="records")
+@app.get("/")
+def root():
+    """Health check and API info endpoint"""
+    return {
+        "status": "ok",
+        "message": "FastAPI backend is running",
+        "endpoints": {
+            "csv": "/csv - Get all data as JSON array",
+            "plot": "/plot/{oid} - Get light curve plot for an OID"
+        },
+        "total_records": len(df) if 'df' in globals() else 0
+    }
 
 @app.get("/plot/{oid}")
 def get_light_curve_plot(oid: str):
