@@ -75,7 +75,7 @@ if not df.empty and 'r_squared' in df.columns and 'oid' in df.columns:
 
 @app.get("/csv")
 @app.get("/data")  # Alias for frontend compatibility
-def get_csv(request: Request = None, oid: str = Query(None, description="Optional: Get a specific row by OID")):
+def get_csv(oid: str = Query(None, description="Optional: Get a specific row by OID")):
     """
     Get CSV data as JSON array with plot image URLs included.
     Returns: List of objects with oid, peak_luminosity, r_squared, Total_TDE_Score, plot_url
@@ -88,33 +88,44 @@ def get_csv(request: Request = None, oid: str = Query(None, description="Optiona
         print(f"[DEBUG] /csv endpoint called", flush=True)
         sys.stdout.flush()
         
-        # Check if dataframe is loaded
-        if 'df' not in globals() or df.empty:
-            print(f"[ERROR] DataFrame is empty or not loaded", flush=True)
+        # Check if dataframe is loaded and not empty - with detailed logging
+        if 'df' not in globals():
+            print(f"[ERROR] DataFrame variable 'df' does not exist in globals", flush=True)
             raise HTTPException(
                 status_code=500,
                 detail="CSV file not loaded. Please check server logs for errors."
             )
         
-        print(f"[DEBUG] DataFrame has {len(df)} rows", flush=True)
+        if df.empty:
+            print(f"[ERROR] DataFrame is empty! This should not happen after startup.", flush=True)
+            print(f"[ERROR] Attempting to reload CSV file...", flush=True)
+            # Try to reload the CSV as a safety measure
+            try:
+                global df, csv_path
+                # Reload CSV from the path
+                reload_path = CSV_FILE if os.path.exists(CSV_FILE) else os.path.join(os.path.dirname(os.path.abspath(__file__)), CSV_FILE)
+                df = pd.read_csv(reload_path)
+                print(f"[INFO] Successfully reloaded CSV file: {reload_path} ({len(df)} rows)", flush=True)
+            except Exception as reload_error:
+                print(f"[ERROR] Failed to reload CSV: {reload_error}", flush=True)
+                raise HTTPException(
+                    status_code=500,
+                    detail="CSV file is empty and could not be reloaded. Please check server logs."
+                )
+        
+        # Verify df still has data after checks
+        if df.empty:
+            raise HTTPException(
+                status_code=500,
+                detail="DataFrame is empty after reload attempt. Please check CSV file."
+            )
+        
+        print(f"[DEBUG] DataFrame has {len(df)} rows (safely loaded)", flush=True)
         sys.stdout.flush()
         
-        # Get the base URL for constructing plot URLs - simplified approach
+        # Get the base URL for constructing plot URLs - use hardcoded URL
         base_url = "https://datamine-group1.onrender.com"
-        if request:
-            try:
-                # Try to get from request headers first
-                host = request.headers.get("host", "") if hasattr(request, 'headers') else ""
-                if host:
-                    base_url = f"https://{host}"
-                    print(f"[DEBUG] Using base_url from headers: {base_url}", flush=True)
-                else:
-                    print(f"[DEBUG] Using default base_url: {base_url}", flush=True)
-            except Exception as url_error:
-                print(f"[WARNING] Error getting base URL, using default: {url_error}", flush=True)
-                base_url = "https://datamine-group1.onrender.com"
-        else:
-            print(f"[DEBUG] No request object, using default base_url: {base_url}", flush=True)
+        print(f"[DEBUG] Using base_url: {base_url}", flush=True)
         
         sys.stdout.flush()
         
@@ -136,18 +147,37 @@ def get_csv(request: Request = None, oid: str = Query(None, description="Optiona
         sys.stdout.flush()
         
         # Select subset and handle NaN values
+        # IMPORTANT: Always use .copy() to avoid modifying the original df
         try:
+            # Verify original df still has data before filtering
+            if df.empty:
+                print(f"[ERROR] Original df became empty during processing!", flush=True)
+                raise HTTPException(
+                    status_code=500,
+                    detail="DataFrame became empty during processing. This should not happen."
+                )
+            
             # If OID is specified, filter to just that row
             if oid:
                 print(f"[DEBUG] Filtering for OID: {oid}", flush=True)
+                # Use .copy() to ensure we don't modify the original df
                 subset = df[df['oid'] == oid][cols_to_show].copy()
                 if subset.empty:
                     raise HTTPException(status_code=404, detail=f"OID '{oid}' not found in CSV")
                 print(f"[DEBUG] Found 1 row for OID: {oid}", flush=True)
             else:
+                # Use .copy() to ensure we don't modify the original df
                 subset = df[cols_to_show].copy()
-            print(f"[DEBUG] Subset created with {len(subset)} rows", flush=True)
+            print(f"[DEBUG] Subset created with {len(subset)} rows (original df still has {len(df)} rows)", flush=True)
             sys.stdout.flush()
+            
+            # Double-check original df wasn't modified
+            if df.empty:
+                print(f"[ERROR] Original df was modified and became empty!", flush=True)
+                raise HTTPException(
+                    status_code=500,
+                    detail="DataFrame was modified during processing. This is a bug."
+                )
         except HTTPException:
             raise
         except Exception as subset_error:
