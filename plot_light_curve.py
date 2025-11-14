@@ -370,5 +370,3 @@ def get_all_OIDs_from_csv(csv_file: str, r_band_only: bool = True, save_dir: str
     print(f"{'='*60}")
     
     return stats
-
-get_all_OIDs_from_csv('ztf_objects_summary.csv', r_band_only=True, save_dir='light_curves', max_objects=10, show_plot=True)

@@ -50,6 +50,7 @@ if 'r_squared' in df.columns:
             r_squared_map[oid] = None
 
 @app.get("/csv")
+@app.get("/data")  # Alias for frontend compatibility
 def get_csv(request: Request):
     """
     Get CSV data as JSON array with plot image URLs included.
@@ -94,7 +95,7 @@ def root():
         "status": "ok",
         "message": "FastAPI backend is running",
         "endpoints": {
-            "csv": "/csv - Get all data as JSON array",
+            "csv": "/csv or /data - Get all data as JSON array",
             "plot": "/plot/{oid} - Get light curve plot for an OID"
         },
         "total_records": len(df) if 'df' in globals() else 0
