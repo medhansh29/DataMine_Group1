@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
@@ -75,76 +75,139 @@ if not df.empty and 'r_squared' in df.columns and 'oid' in df.columns:
 
 @app.get("/csv")
 @app.get("/data")  # Alias for frontend compatibility
-def get_csv(request: Request):
+def get_csv(request: Request = None, oid: str = Query(None, description="Optional: Get a specific row by OID")):
     """
     Get CSV data as JSON array with plot image URLs included.
     Returns: List of objects with oid, peak_luminosity, r_squared, Total_TDE_Score, plot_url
+    If 'oid' parameter is provided, returns only that specific row.
     """
+    import sys
+    import traceback
+    
     try:
+        print(f"[DEBUG] /csv endpoint called", flush=True)
+        sys.stdout.flush()
+        
         # Check if dataframe is loaded
-        if df.empty:
+        if 'df' not in globals() or df.empty:
+            print(f"[ERROR] DataFrame is empty or not loaded", flush=True)
             raise HTTPException(
                 status_code=500,
                 detail="CSV file not loaded. Please check server logs for errors."
             )
         
-        # Get the base URL for constructing plot URLs
-        # Use the Host header if available, otherwise construct from request
-        try:
-            # Get host from headers (more reliable)
-            host = request.headers.get("host", "")
-            scheme = request.url.scheme if hasattr(request.url, 'scheme') else "https"
-            if host:
-                base_url = f"{scheme}://{host}"
-            else:
-                # Fallback to base_url
-                base_url = str(request.base_url).rstrip('/')
-                # Remove port if it's 80/443 (standard ports)
-                if ":80" in base_url:
-                    base_url = base_url.replace(":80", "")
-                if ":443" in base_url:
-                    base_url = base_url.replace(":443", "")
-        except Exception as url_error:
-            print(f"Warning: Error getting base URL: {url_error}")
-            # Fallback to hardcoded Render URL (you can update this)
-            base_url = "https://datamine-group1.onrender.com"
+        print(f"[DEBUG] DataFrame has {len(df)} rows", flush=True)
+        sys.stdout.flush()
+        
+        # Get the base URL for constructing plot URLs - simplified approach
+        base_url = "https://datamine-group1.onrender.com"
+        if request:
+            try:
+                # Try to get from request headers first
+                host = request.headers.get("host", "") if hasattr(request, 'headers') else ""
+                if host:
+                    base_url = f"https://{host}"
+                    print(f"[DEBUG] Using base_url from headers: {base_url}", flush=True)
+                else:
+                    print(f"[DEBUG] Using default base_url: {base_url}", flush=True)
+            except Exception as url_error:
+                print(f"[WARNING] Error getting base URL, using default: {url_error}", flush=True)
+                base_url = "https://datamine-group1.onrender.com"
+        else:
+            print(f"[DEBUG] No request object, using default base_url: {base_url}", flush=True)
+        
+        sys.stdout.flush()
         
         # Select the columns to show
         # Note: Column names match CSV exactly (case-sensitive)
         cols_to_show = ["oid", "peak_luminosity", "r_squared", "Total_TDE_Score"]
+        print(f"[DEBUG] Looking for columns: {cols_to_show}", flush=True)
+        print(f"[DEBUG] Available columns: {list(df.columns)}", flush=True)
+        sys.stdout.flush()
         
         # Check if all columns exist
         missing_cols = [col for col in cols_to_show if col not in df.columns]
         if missing_cols:
-            raise HTTPException(
-                status_code=500, 
-                detail=f"Missing columns in CSV: {missing_cols}. Available columns: {list(df.columns)}"
-            )
+            error_msg = f"Missing columns in CSV: {missing_cols}. Available columns: {list(df.columns)}"
+            print(f"[ERROR] {error_msg}", flush=True)
+            raise HTTPException(status_code=500, detail=error_msg)
         
-        subset = df[cols_to_show]
+        print(f"[DEBUG] All columns found, selecting subset...", flush=True)
+        sys.stdout.flush()
+        
+        # Select subset and handle NaN values
+        try:
+            # If OID is specified, filter to just that row
+            if oid:
+                print(f"[DEBUG] Filtering for OID: {oid}", flush=True)
+                subset = df[df['oid'] == oid][cols_to_show].copy()
+                if subset.empty:
+                    raise HTTPException(status_code=404, detail=f"OID '{oid}' not found in CSV")
+                print(f"[DEBUG] Found 1 row for OID: {oid}", flush=True)
+            else:
+                subset = df[cols_to_show].copy()
+            print(f"[DEBUG] Subset created with {len(subset)} rows", flush=True)
+            sys.stdout.flush()
+        except HTTPException:
+            raise
+        except Exception as subset_error:
+            print(f"[ERROR] Error creating subset: {subset_error}", flush=True)
+            traceback.print_exc()
+            raise
         
         # Convert NaN values to None for JSON serialization
-        subset = subset.where(pd.notnull(subset), None)
+        print(f"[DEBUG] Converting NaN to None...", flush=True)
+        sys.stdout.flush()
+        try:
+            for col in subset.columns:
+                subset[col] = subset[col].where(pd.notnull(subset[col]), None)
+        except Exception as nan_error:
+            print(f"[ERROR] Error converting NaN: {nan_error}", flush=True)
+            traceback.print_exc()
+            raise
+        
+        print(f"[DEBUG] Converting to dict...", flush=True)
+        sys.stdout.flush()
         
         # Convert the subset to a dictionary and return it
-        # This returns a list of dictionaries: [{"oid": "...", "peak_luminosity": ..., ...}, ...]
-        result = subset.to_dict(orient="records")
+        try:
+            result = subset.to_dict(orient="records")
+            print(f"[DEBUG] Dict conversion complete, {len(result)} records", flush=True)
+            sys.stdout.flush()
+        except Exception as dict_error:
+            print(f"[ERROR] Error converting to dict: {dict_error}", flush=True)
+            traceback.print_exc()
+            raise
+        
+        print(f"[DEBUG] Adding plot_url to each item...", flush=True)
+        sys.stdout.flush()
         
         # Add plot_url for each OID and ensure OID is a string
-        for item in result:
-            oid = str(item['oid']) if item['oid'] is not None else ""
-            item['oid'] = oid
-            # Create URL to the plot endpoint for this OID
-            item['plot_url'] = f"{base_url}/plot/{oid}"
+        try:
+            for i, item in enumerate(result):
+                oid = str(item['oid']) if item['oid'] is not None else ""
+                item['oid'] = oid
+                # Create URL to the plot endpoint for this OID
+                item['plot_url'] = f"{base_url}/plot/{oid}"
+                if i < 3:  # Log first 3 for debugging
+                    print(f"[DEBUG] Item {i}: oid={oid}", flush=True)
+        except Exception as item_error:
+            print(f"[ERROR] Error processing items: {item_error}", flush=True)
+            traceback.print_exc()
+            raise
+        
+        print(f"[DEBUG] Returning {len(result)} records", flush=True)
+        sys.stdout.flush()
         
         return result
+        
     except HTTPException:
         # Re-raise HTTP exceptions
         raise
     except Exception as e:
-        import traceback
         error_details = traceback.format_exc()
-        print(f"Error in /csv endpoint: {error_details}")
+        print(f"[ERROR] Error in /csv endpoint: {error_details}", flush=True)
+        sys.stdout.flush()
         raise HTTPException(status_code=500, detail=f"Error processing CSV: {str(e)}")
 
 @app.get("/")
