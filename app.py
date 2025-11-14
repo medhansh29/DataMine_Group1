@@ -84,6 +84,9 @@ def get_csv(oid: str = Query(None, description="Optional: Get a specific row by 
     import sys
     import traceback
     
+    # IMPORTANT: global declaration must be at the top, before any use of df
+    global df, csv_path
+    
     try:
         print(f"[DEBUG] /csv endpoint called", flush=True)
         sys.stdout.flush()
@@ -101,7 +104,6 @@ def get_csv(oid: str = Query(None, description="Optional: Get a specific row by 
             print(f"[ERROR] Attempting to reload CSV file...", flush=True)
             # Try to reload the CSV as a safety measure
             try:
-                global df, csv_path
                 # Reload CSV from the path
                 reload_path = CSV_FILE if os.path.exists(CSV_FILE) else os.path.join(os.path.dirname(os.path.abspath(__file__)), CSV_FILE)
                 df = pd.read_csv(reload_path)
