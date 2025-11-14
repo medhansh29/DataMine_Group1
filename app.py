@@ -89,7 +89,25 @@ def get_csv(request: Request):
             )
         
         # Get the base URL for constructing plot URLs
-        base_url = str(request.base_url).rstrip('/')
+        # Use the Host header if available, otherwise construct from request
+        try:
+            # Get host from headers (more reliable)
+            host = request.headers.get("host", "")
+            scheme = request.url.scheme if hasattr(request.url, 'scheme') else "https"
+            if host:
+                base_url = f"{scheme}://{host}"
+            else:
+                # Fallback to base_url
+                base_url = str(request.base_url).rstrip('/')
+                # Remove port if it's 80/443 (standard ports)
+                if ":80" in base_url:
+                    base_url = base_url.replace(":80", "")
+                if ":443" in base_url:
+                    base_url = base_url.replace(":443", "")
+        except Exception as url_error:
+            print(f"Warning: Error getting base URL: {url_error}")
+            # Fallback to hardcoded Render URL (you can update this)
+            base_url = "https://datamine-group1.onrender.com"
         
         # Select the columns to show
         # Note: Column names match CSV exactly (case-sensitive)
@@ -105,13 +123,17 @@ def get_csv(request: Request):
         
         subset = df[cols_to_show]
         
+        # Convert NaN values to None for JSON serialization
+        subset = subset.where(pd.notnull(subset), None)
+        
         # Convert the subset to a dictionary and return it
         # This returns a list of dictionaries: [{"oid": "...", "peak_luminosity": ..., ...}, ...]
         result = subset.to_dict(orient="records")
         
-        # Add plot_url for each OID
+        # Add plot_url for each OID and ensure OID is a string
         for item in result:
-            oid = item['oid']
+            oid = str(item['oid']) if item['oid'] is not None else ""
+            item['oid'] = oid
             # Create URL to the plot endpoint for this OID
             item['plot_url'] = f"{base_url}/plot/{oid}"
         
