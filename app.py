@@ -232,11 +232,27 @@ def get_csv(oid: str = Query(None, description="Optional: Get a specific row by 
         sys.stdout.flush()
         
         # Ensure all data is JSON serializable before returning
-        print(f"[DEBUG] Validating JSON serialization...", flush=True)
+        print(f"[DEBUG] Validating and cleaning JSON serialization...", flush=True)
+        import json
+        import math
+        
+        # Clean all float values that are not JSON compliant (inf, -inf, nan)
+        print(f"[DEBUG] Cleaning float values (inf, -inf, nan)...", flush=True)
+        for item in result:
+            for key, value in item.items():
+                if isinstance(value, float):
+                    # Check for infinity or NaN values
+                    if math.isinf(value) or math.isnan(value):
+                        print(f"[DEBUG] Found non-JSON float: {key}={value}, converting to None", flush=True)
+                        item[key] = None
+                    # Check for extremely large values that might cause issues
+                    elif abs(value) > 1e308:  # JSON max safe number
+                        print(f"[DEBUG] Found extremely large float: {key}={value}, converting to None", flush=True)
+                        item[key] = None
+        
         serialization_passed = False
         try:
             # Test serialization with a sample
-            import json
             test_sample = result[:10] if len(result) > 10 else result
             json.dumps(test_sample)
             serialization_passed = True
@@ -253,15 +269,18 @@ def get_csv(oid: str = Query(None, description="Optional: Get a specific row by 
                             item[key] = str(value)
                         except:
                             item[key] = None
+                    elif isinstance(value, float):
+                        # Double-check float values
+                        if math.isinf(value) or math.isnan(value) or abs(value) > 1e308:
+                            item[key] = None
             print(f"[DEBUG] Attempted to fix non-serializable values", flush=True)
             # Retest after fixing
             try:
-                import json
                 json.dumps(result[:10] if len(result) > 10 else result)
                 serialization_passed = True
                 print(f"[DEBUG] JSON serialization test passed after fixing", flush=True)
-            except:
-                print(f"[ERROR] Still failing after fix attempt", flush=True)
+            except Exception as retest_error:
+                print(f"[ERROR] Still failing after fix attempt: {retest_error}", flush=True)
         
         # Use JSONResponse explicitly to ensure proper serialization
         print(f"[DEBUG] Returning data via JSONResponse (serialization_passed={serialization_passed})...", flush=True)
