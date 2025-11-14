@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import matplotlib.pyplot as plt
 import io
+import os
 from alerce.core import Alerce
 from plot_light_curve import plot_light_curve
 
@@ -25,15 +26,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-#Load the CSV file
-df = pd.read_csv("ztf_objects_summary.csv")
+# Load the CSV file with proper path resolution
+CSV_FILE = "ztf_objects_summary.csv"
+# Try to find CSV file - check relative path first, then absolute
+csv_path = CSV_FILE
+if not os.path.exists(csv_path):
+    # Try in current directory
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    csv_path = os.path.join(base_dir, CSV_FILE)
+
+try:
+    df = pd.read_csv(csv_path)
+    print(f"Successfully loaded CSV file: {csv_path} ({len(df)} rows)")
+except FileNotFoundError:
+    print(f"ERROR: CSV file not found at: {csv_path}")
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Files in current directory: {os.listdir('.')}")
+    # Create empty dataframe to prevent startup crash
+    df = pd.DataFrame()
+    raise Exception(f"CSV file 'ztf_objects_summary.csv' not found. Please ensure it exists in the repository.")
+except Exception as e:
+    print(f"ERROR loading CSV file: {e}")
+    import traceback
+    traceback.print_exc()
+    df = pd.DataFrame()
+    raise
 
 # Initialize Alerce client (reuse for all requests)
 alerce_client = Alerce()
 
 # Create mapping from OID to r_squared from CSV (for plot generation)
 r_squared_map = {}
-if 'r_squared' in df.columns:
+if not df.empty and 'r_squared' in df.columns and 'oid' in df.columns:
     for oid in df['oid'].unique():
         oid_data = df[df['oid'] == oid]
         r_sq_values = oid_data['r_squared'].dropna()
@@ -57,6 +81,13 @@ def get_csv(request: Request):
     Returns: List of objects with oid, peak_luminosity, r_squared, Total_TDE_Score, plot_url
     """
     try:
+        # Check if dataframe is loaded
+        if df.empty:
+            raise HTTPException(
+                status_code=500,
+                detail="CSV file not loaded. Please check server logs for errors."
+            )
+        
         # Get the base URL for constructing plot URLs
         base_url = str(request.base_url).rstrip('/')
         
@@ -85,7 +116,13 @@ def get_csv(request: Request):
             item['plot_url'] = f"{base_url}/plot/{oid}"
         
         return result
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error in /csv endpoint: {error_details}")
         raise HTTPException(status_code=500, detail=f"Error processing CSV: {str(e)}")
 
 @app.get("/")
