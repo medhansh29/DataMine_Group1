@@ -4,6 +4,7 @@ from redshifts import fetch_redshifts_from_csv
 from date_filter import fetch_detection_dates_menu_option
 from offset import process_offsets_from_csv
 from scorer import calculate_and_save_tde_scores
+from filter_variable_stars import filter_variable_stars_and_probabilities
 import os
 import time
 
@@ -23,7 +24,8 @@ def show_menu():
     print("4. Filter curve data for objects in CSV")
     print("5. Compute angular offsets and normalized offsets for objects in CSV")
     print("6. Calculate TDE scores and rank candidates")
-    print("7. Exit")
+    print("7. Filter variable stars and probabilities for TDEs")
+    print("8. Exit")
     print("="*50)
 
 if __name__ == '__main__':
@@ -103,6 +105,17 @@ if __name__ == '__main__':
                         print("TDE scoring completed and CSV updated.")
 
             elif choice == '7':
+                # Filter variable stars and probabilities for TDEs
+                if not os.path.exists(CSV_PATH):
+                    print(f"Error: {os.path.basename(CSV_PATH)} file not found!")
+                    print("Please fetch some ZTF objects first (option 1).")
+                else:
+                    print("\n--- Filtering Variable Stars and Probabilities for TDEs ---")
+                    result = filter_variable_stars_and_probabilities(CSV_PATH)
+                    if result is not None:
+                        print("Variable stars and probabilities filtering completed and CSV updated.")
+
+            elif choice == '8':
                 print("Exiting...")
                 break
                 

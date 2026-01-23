@@ -370,3 +370,6 @@ def get_all_OIDs_from_csv(csv_file: str, r_band_only: bool = True, save_dir: str
     print(f"{'='*60}")
     
     return stats
+
+alerce_client = Alerce()
+plot_light_curve("ZTF18aavqliv", alerce_client, r_band_only=True, save_path="plots/ZTF18aavqliv.png", show_plot=True, r_squared_from_csv=None)
